@@ -3,13 +3,13 @@
 #include <boost/beast/version.hpp>
 #include <boost/asio.hpp>
 #include <boost/config.hpp>
-#include <fstream>
 #include <thread>
-#include "json.hpp"
-#include <chrono>
 #include <iostream>
-#include <iomanip> // for std::put_time
-#include <ctime>   // for std::time_t
+#include <sstream>
+#include <iomanip>
+#include <ctime>
+#include <chrono>
+#include "json.hpp"
 
 using tcp = boost::asio::ip::tcp;
 namespace http = boost::beast::http;
@@ -27,22 +27,6 @@ std::string timestamp()
     return oss.str();
 }
 
-void load_config(const std::string &path)
-{
-    std::ifstream file(path);
-    if (file)
-    {
-        json config;
-        file >> config;
-        response_delay_ms = config.value("response_delay_ms", 0);
-        std::cout << "[" << timestamp() << "] Response delay set to " << response_delay_ms << " ms\n";
-    }
-    else
-    {
-        std::cout << "[" << timestamp() << "] Config file not found, using default delay: 0 ms\n";
-    }
-}
-
 template <class Body, class Allocator, class Send>
 void handle_request(http::request<Body, http::basic_fields<Allocator>> &&req, Send &&send)
 {
@@ -51,19 +35,46 @@ void handle_request(http::request<Body, http::basic_fields<Allocator>> &&req, Se
         std::cout << "[" << timestamp() << "] 📥 Received GET /hello request\n";
 
         std::this_thread::sleep_for(std::chrono::milliseconds(response_delay_ms));
-        http::string_body::value_type body = "Hello I got your message";
-        auto const size = body.size();
+        std::string body = "Hello I got your message";
 
-        http::response<http::string_body> res{
-            std::piecewise_construct,
-            std::make_tuple(std::move(body)),
-            std::make_tuple(http::status::ok, req.version())};
+        http::response<http::string_body> res{http::status::ok, req.version()};
         res.set(http::field::server, "Boost.Beast");
         res.set(http::field::content_type, "text/plain");
-        res.content_length(size);
+        res.body() = body;
+        res.prepare_payload();
         res.keep_alive(req.keep_alive());
 
         std::cout << "[" << timestamp() << "] ✅ Responded to client\n";
+        return send(std::move(res));
+    }
+    else if (req.method() == http::verb::post && req.target() == "/config")
+    {
+        std::cout << "[" << timestamp() << "] 🛠️ Received POST /config\n";
+
+        try
+        {
+            auto config_json = json::parse(req.body());
+            if (config_json.contains("response_delay_ms"))
+            {
+                response_delay_ms = config_json["response_delay_ms"].get<int>();
+                std::cout << "[" << timestamp() << "] 🔧 Set response_delay_ms to " << response_delay_ms << " ms\n";
+
+                http::response<http::string_body> res{http::status::ok, req.version()};
+                res.set(http::field::content_type, "application/json");
+                res.body() = R"({"status":"ok","response_delay_ms":)" + std::to_string(response_delay_ms) + "}";
+                res.prepare_payload();
+                return send(std::move(res));
+            }
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << "[" << timestamp() << "] ❗ Failed to parse JSON: " << e.what() << "\n";
+        }
+
+        http::response<http::string_body> res{http::status::bad_request, req.version()};
+        res.set(http::field::content_type, "text/plain");
+        res.body() = "Invalid JSON or missing 'response_delay_ms'";
+        res.prepare_payload();
         return send(std::move(res));
     }
 
@@ -78,9 +89,7 @@ void handle_request(http::request<Body, http::basic_fields<Allocator>> &&req, Se
 
 void do_session(tcp::socket socket)
 {
-    bool close = false;
     boost::beast::error_code ec;
-
     boost::beast::flat_buffer buffer;
 
     http::request<http::string_body> req;
@@ -107,25 +116,23 @@ void server(boost::asio::io_context &ioc, unsigned short port)
     {
         tcp::socket socket(ioc);
         acceptor.accept(socket);
-        std::thread([s = std::move(socket)]() mutable
-                    { do_session(std::move(s)); })
-            .detach();
+        std::thread([s = std::move(socket)]() mutable {
+            do_session(std::move(s));
+        }).detach();
     }
 }
 
-int main(int argc, char *argv[])
+int main()
 {
-    load_config("config.json");
-
     try
     {
         boost::asio::io_context ioc{1};
-        std::cout << "[" << timestamp() << "] 🚀 Server running on http://0.0.0.0:9798/hello\n";
+        std::cout << "[" << timestamp() << "] 🚀 Server running at http://0.0.0.0:9798\n";
         server(ioc, 9798);
     }
     catch (std::exception const &e)
     {
-        std::cerr << "[" << timestamp() << "] ❗ Error: " << e.what() << std::endl;
+        std::cerr << "[" << timestamp() << "] ❗ Error: " << e.what() << "\n";
         return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;
