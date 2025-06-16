@@ -3,13 +3,14 @@
 #include <boost/beast/version.hpp>
 #include <boost/asio.hpp>
 #include <boost/config.hpp>
+#include "json.hpp"
+#include <fstream>
 #include <thread>
+#include <chrono>
 #include <iostream>
-#include <sstream>
 #include <iomanip>
 #include <ctime>
-#include <chrono>
-#include "json.hpp"
+#include <sstream>
 
 using tcp = boost::asio::ip::tcp;
 namespace http = boost::beast::http;
@@ -32,54 +33,60 @@ void handle_request(http::request<Body, http::basic_fields<Allocator>> &&req, Se
 {
     if (req.method() == http::verb::get && req.target() == "/hello")
     {
-        std::cout << "[" << timestamp() << "] 📥 Received GET /hello request\n";
-
+        std::cout << "[" << timestamp() << "] 📥 Received GET /hello\n";
         std::this_thread::sleep_for(std::chrono::milliseconds(response_delay_ms));
-        std::string body = "Hello I got your message";
 
-        http::response<http::string_body> res{http::status::ok, req.version()};
+        http::string_body::value_type body = "Hello I got your message";
+        auto const size = body.size();
+
+        http::response<http::string_body> res{
+            std::piecewise_construct,
+            std::make_tuple(std::move(body)),
+            std::make_tuple(http::status::ok, req.version())};
+
         res.set(http::field::server, "Boost.Beast");
         res.set(http::field::content_type, "text/plain");
-        res.body() = body;
-        res.prepare_payload();
+        res.content_length(size);
         res.keep_alive(req.keep_alive());
 
-        std::cout << "[" << timestamp() << "] ✅ Responded to client\n";
+        std::cout << "[" << timestamp() << "] ✅ Responded with 200 OK\n";
         return send(std::move(res));
     }
-    else if (req.method() == http::verb::post && req.target() == "/config")
-    {
-        std::cout << "[" << timestamp() << "] 🛠️ Received POST /config\n";
 
+    if (req.method() == http::verb::post && req.target() == "/config")
+    {
+        std::cout << "[" << timestamp() << "] 📥 Received POST /config\n";
         try
         {
             auto config_json = json::parse(req.body());
+
             if (config_json.contains("response_delay_ms"))
             {
-                response_delay_ms = config_json["response_delay_ms"].get<int>();
+                response_delay_ms = config_json["response_delay_ms"].template get<int>();
                 std::cout << "[" << timestamp() << "] 🔧 Set response_delay_ms to " << response_delay_ms << " ms\n";
-
-                http::response<http::string_body> res{http::status::ok, req.version()};
-                res.set(http::field::content_type, "application/json");
-                res.body() = R"({"status":"ok","response_delay_ms":)" + std::to_string(response_delay_ms) + "}";
-                res.prepare_payload();
-                return send(std::move(res));
             }
+
+            http::string_body::value_type body = "Config updated";
+            http::response<http::string_body> res{
+                std::piecewise_construct,
+                std::make_tuple(std::move(body)),
+                std::make_tuple(http::status::ok, req.version())};
+            res.set(http::field::content_type, "text/plain");
+            res.keep_alive(req.keep_alive());
+            res.prepare_payload();
+            return send(std::move(res));
         }
         catch (const std::exception &e)
         {
-            std::cerr << "[" << timestamp() << "] ❗ Failed to parse JSON: " << e.what() << "\n";
+            http::response<http::string_body> res{http::status::bad_request, req.version()};
+            res.set(http::field::content_type, "text/plain");
+            res.body() = std::string("Invalid JSON: ") + e.what();
+            res.prepare_payload();
+            return send(std::move(res));
         }
-
-        http::response<http::string_body> res{http::status::bad_request, req.version()};
-        res.set(http::field::content_type, "text/plain");
-        res.body() = "Invalid JSON or missing 'response_delay_ms'";
-        res.prepare_payload();
-        return send(std::move(res));
     }
 
     std::cout << "[" << timestamp() << "] ❌ Unknown path: " << req.target() << "\n";
-
     http::response<http::string_body> res{http::status::not_found, req.version()};
     res.set(http::field::content_type, "text/plain");
     res.body() = "Not found";
@@ -94,9 +101,10 @@ void do_session(tcp::socket socket)
 
     http::request<http::string_body> req;
     http::read(socket, buffer, req, ec);
+
     if (ec)
     {
-        std::cerr << "[" << timestamp() << "] ⚠️ Error reading request: " << ec.message() << "\n";
+        std::cerr << "[" << timestamp() << "] ⚠️  Error reading request: " << ec.message() << "\n";
         return;
     }
 
@@ -127,13 +135,14 @@ int main()
     try
     {
         boost::asio::io_context ioc{1};
-        std::cout << "[" << timestamp() << "] 🚀 Server running at http://0.0.0.0:9798\n";
+        std::cout << "[" << timestamp() << "] 🚀 Server started at http://0.0.0.0:9798\n";
         server(ioc, 9798);
     }
-    catch (std::exception const &e)
+    catch (const std::exception &e)
     {
-        std::cerr << "[" << timestamp() << "] ❗ Error: " << e.what() << "\n";
+        std::cerr << "[" << timestamp() << "] ❗ Fatal error: " << e.what() << "\n";
         return EXIT_FAILURE;
     }
+
     return EXIT_SUCCESS;
 }
