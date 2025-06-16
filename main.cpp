@@ -8,12 +8,24 @@
 #include "json.hpp"
 #include <chrono>
 #include <iostream>
+#include <iomanip> // for std::put_time
+#include <ctime>   // for std::time_t
 
 using tcp = boost::asio::ip::tcp;
 namespace http = boost::beast::http;
 using json = nlohmann::json;
 
 int response_delay_ms = 0;
+
+std::string timestamp()
+{
+    auto now = std::chrono::system_clock::now();
+    std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+    std::tm tm = *std::localtime(&now_c);
+    std::ostringstream oss;
+    oss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
+    return oss.str();
+}
 
 void load_config(const std::string &path)
 {
@@ -23,7 +35,11 @@ void load_config(const std::string &path)
         json config;
         file >> config;
         response_delay_ms = config.value("response_delay_ms", 0);
-        std::cout << "Response delay set to " << response_delay_ms << " ms\n";
+        std::cout << "[" << timestamp() << "] Response delay set to " << response_delay_ms << " ms\n";
+    }
+    else
+    {
+        std::cout << "[" << timestamp() << "] Config file not found, using default delay: 0 ms\n";
     }
 }
 
@@ -32,6 +48,8 @@ void handle_request(http::request<Body, http::basic_fields<Allocator>> &&req, Se
 {
     if (req.method() == http::verb::get && req.target() == "/hello")
     {
+        std::cout << "[" << timestamp() << "] 📥 Received GET /hello request\n";
+
         std::this_thread::sleep_for(std::chrono::milliseconds(response_delay_ms));
         http::string_body::value_type body = "Hello I got your message";
         auto const size = body.size();
@@ -44,10 +62,13 @@ void handle_request(http::request<Body, http::basic_fields<Allocator>> &&req, Se
         res.set(http::field::content_type, "text/plain");
         res.content_length(size);
         res.keep_alive(req.keep_alive());
+
+        std::cout << "[" << timestamp() << "] ✅ Responded to client\n";
         return send(std::move(res));
     }
 
-    // 404 Not Found
+    std::cout << "[" << timestamp() << "] ❌ Unknown path: " << req.target() << "\n";
+
     http::response<http::string_body> res{http::status::not_found, req.version()};
     res.set(http::field::content_type, "text/plain");
     res.body() = "Not found";
@@ -65,7 +86,10 @@ void do_session(tcp::socket socket)
     http::request<http::string_body> req;
     http::read(socket, buffer, req, ec);
     if (ec)
+    {
+        std::cerr << "[" << timestamp() << "] ⚠️ Error reading request: " << ec.message() << "\n";
         return;
+    }
 
     auto const send = [&socket](auto &&response)
     {
@@ -96,12 +120,12 @@ int main(int argc, char *argv[])
     try
     {
         boost::asio::io_context ioc{1};
-        std::cout << "Server running on http://0.0.0.0:9798/hello\n";
+        std::cout << "[" << timestamp() << "] 🚀 Server running on http://0.0.0.0:9798/hello\n";
         server(ioc, 9798);
     }
     catch (std::exception const &e)
     {
-        std::cerr << "Error: " << e.what() << std::endl;
+        std::cerr << "[" << timestamp() << "] ❗ Error: " << e.what() << std::endl;
         return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;
