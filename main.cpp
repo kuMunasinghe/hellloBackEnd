@@ -33,7 +33,7 @@ void handle_request(http::request<Body, http::basic_fields<Allocator>> &&req, Se
 {
     if (req.method() == http::verb::get && req.target() == "/hello")
     {
-        std::cout << "[" << timestamp() << "] 📥 Received GET /hello\n";
+        std::cout << "[" << timestamp() << "] Received GET /hello\n";
         std::this_thread::sleep_for(std::chrono::milliseconds(response_delay_ms));
 
         http::string_body::value_type body = "Hello I got your message";
@@ -49,13 +49,13 @@ void handle_request(http::request<Body, http::basic_fields<Allocator>> &&req, Se
         res.content_length(size);
         res.keep_alive(req.keep_alive());
 
-        std::cout << "[" << timestamp() << "] ✅ Responded with 200 OK\n";
+        std::cout << "[" << timestamp() << "] Responded with 200 OK\n";
         return send(std::move(res));
     }
 
     if (req.method() == http::verb::post && req.target() == "/config")
     {
-        std::cout << "[" << timestamp() << "] 📥 Received POST /config\n";
+        std::cout << "[" << timestamp() << "] Received POST /config\n";
         try
         {
             auto config_json = json::parse(req.body());
@@ -87,7 +87,7 @@ void handle_request(http::request<Body, http::basic_fields<Allocator>> &&req, Se
         }
     }
 
-    std::cout << "[" << timestamp() << "] ❌ Unknown path: " << req.target() << "\n";
+    std::cout << "[" << timestamp() << "] Unknown path: " << req.target() << "\n";
     http::response<http::string_body> res{http::status::not_found, req.version()};
     res.set(http::field::content_type, "text/plain");
     res.body() = "Not found";
@@ -111,11 +111,11 @@ void do_session(tcp::socket socket)
 
         if (ec)
         {
-            std::cerr << "[" << timestamp() << "] ⚠️  Error reading request: " << ec.message() << "\n";
+            std::cerr << "[" << timestamp() << "] Error reading request: " << ec.message() << "\n";
             break;
         }
 
-        std::cout << "[" << timestamp() << "] 🔄 Connection keep-alive: " << std::boolalpha << req.keep_alive() << "\n";
+        std::cout << "[" << timestamp() << "] Connection keep-alive: " << std::boolalpha << req.keep_alive() << "\n";
 
         auto const send = [&socket](auto &&response)
         {
@@ -123,7 +123,7 @@ void do_session(tcp::socket socket)
             http::write(socket, response, write_ec);
             if (write_ec)
             {
-                std::cerr << "[" << timestamp() << "] ⚠️  Error writing response: " << write_ec.message() << "\n";
+                std::cerr << "[" << timestamp() << "] Error writing response: " << write_ec.message() << "\n";
             }
         };
 
@@ -155,12 +155,12 @@ int main()
     try
     {
         boost::asio::io_context ioc{1};
-        std::cout << "[" << timestamp() << "] 🚀 Server started at http://0.0.0.0:9798\n";
+        std::cout << "[" << timestamp() << "]Server started at http://0.0.0.0:9798\n";
         server(ioc, 9798);
     }
     catch (const std::exception &e)
     {
-        std::cerr << "[" << timestamp() << "] ❗ Fatal error: " << e.what() << "\n";
+        std::cerr << "[" << timestamp() << "]Fatal error: " << e.what() << "\n";
         return EXIT_FAILURE;
     }
 
