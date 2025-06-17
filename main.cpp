@@ -81,6 +81,7 @@ void handle_request(http::request<Body, http::basic_fields<Allocator>> &&req, Se
             http::response<http::string_body> res{http::status::bad_request, req.version()};
             res.set(http::field::content_type, "text/plain");
             res.body() = std::string("Invalid JSON: ") + e.what();
+            res.keep_alive(req.keep_alive());
             res.prepare_payload();
             return send(std::move(res));
         }
@@ -90,30 +91,49 @@ void handle_request(http::request<Body, http::basic_fields<Allocator>> &&req, Se
     http::response<http::string_body> res{http::status::not_found, req.version()};
     res.set(http::field::content_type, "text/plain");
     res.body() = "Not found";
+    res.keep_alive(req.keep_alive());
     res.prepare_payload();
     return send(std::move(res));
 }
 
 void do_session(tcp::socket socket)
 {
-    boost::beast::error_code ec;
     boost::beast::flat_buffer buffer;
 
-    http::request<http::string_body> req;
-    http::read(socket, buffer, req, ec);
-
-    if (ec)
+    for (;;)
     {
-        std::cerr << "[" << timestamp() << "] ⚠️  Error reading request: " << ec.message() << "\n";
-        return;
+        boost::beast::error_code ec;
+        http::request<http::string_body> req;
+        http::read(socket, buffer, req, ec);
+
+        if (ec == http::error::end_of_stream)
+            break;
+
+        if (ec)
+        {
+            std::cerr << "[" << timestamp() << "] ⚠️  Error reading request: " << ec.message() << "\n";
+            break;
+        }
+
+        std::cout << "[" << timestamp() << "] 🔄 Connection keep-alive: " << std::boolalpha << req.keep_alive() << "\n";
+
+        auto const send = [&socket](auto &&response)
+        {
+            boost::beast::error_code write_ec;
+            http::write(socket, response, write_ec);
+            if (write_ec)
+            {
+                std::cerr << "[" << timestamp() << "] ⚠️  Error writing response: " << write_ec.message() << "\n";
+            }
+        };
+
+        handle_request(std::move(req), send);
+
+        if (!req.keep_alive())
+            break;
     }
 
-    auto const send = [&socket](auto &&response)
-    {
-        http::write(socket, response);
-    };
-
-    handle_request(std::move(req), send);
+    boost::beast::error_code ec;
     socket.shutdown(tcp::socket::shutdown_send, ec);
 }
 
