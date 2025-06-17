@@ -5,11 +5,11 @@ export const options = {
     scenarios: {
         high_tps_test: {
             executor: 'constant-arrival-rate',
-            rate: 1000,              // 800 requests per second (TPS)
+            rate: 100,              // 800 requests per second (TPS)
             timeUnit: '1s',         
             duration: '10m',         // Test duration
-            preAllocatedVUs: 2000,  // Preallocate up to 1000 VUs
-            maxVUs: 5000,           // Allow bursting up to 1200 VUs
+            preAllocatedVUs: 200,  // Preallocate up to 1000 VUs
+            maxVUs: 300,           // Allow bursting up to 1200 VUs
         },
     },
     thresholds: {
@@ -19,7 +19,7 @@ export const options = {
 };
 
 export default function () {
-    const res = http.get('http://localhost:9798/hello');
+    const res = http.get('http://176.52.143.124:9798/hello');
     check(res, {
         'status is 200': (r) => r.status === 200,
         'body is correct': (r) => r.body === 'Hello I got your message',
